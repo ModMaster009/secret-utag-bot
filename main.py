@@ -26,6 +26,19 @@ async def start_user_client(user_id):
     if os.path.exists(f"{session_name}.session"):
         client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
         
+        try:
+            await client.connect()
+            # Tizimga haqiqatan kirilganligini tekshiramiz
+            me = await client.get_me()
+            if not me:
+                raise Exception("Not authorized")
+        except Exception:
+            await client.disconnect()
+            # Chala qolgan yoki xato sessiyani o'chirib tashlaymiz
+            if os.path.exists(f"{session_name}.session"):
+                os.remove(f"{session_name}.session")
+            return False
+        
         # .atag buyrug'ini foydalanuvchi akkauntiga ulash
         @client.on_message(filters.command("atag", prefixes=".") & filters.me)
         async def start_atag(cli, message):
@@ -86,10 +99,11 @@ async def start_user_client(user_id):
                 active_tags[f"{user_id}_{chat_id}"] = False
                 await message.edit_text("🛑 **To'xtatilmoqda...**")
             else:
-                await message.edit_text("⚠️ Hozir bu guruhda U-Tag jarayoni ketmayapti.")
+                await message.edit_text("⚠️ Hozir bu guruhda U-Tag jarayoni ketmayapti. Boshlash uchun `.atag` yozing")
 
-        await client.start()
-        user_clients[user_id] = client
+        # Start call endi telefon raqam so'ramaydi, chunki biz auth qilinganini tekshirdik
+        if not client.is_initialized:
+            await client.initialize()
         return True
     return False
 
@@ -133,7 +147,7 @@ async def handle_text(client, message):
             user_states[user_id] = "wait_code"
             await message.reply_text("📩 Telegramingizga kod yuborildi!\n\nIltimos kodni yozing (masalan: `12345` bo'lsa `1 2 3 4 5` shaklida bo'sh joy tashlab yozing):")
         except Exception as e:
-            await message.reply_text(f"❌ Xatolik yuz berdi: {e}\n\nRaqamni to'g'ri kiritganingizga ishonch hosil qiling va /start bosing.")
+            await message.reply_text(f"❌ Xatolik yuz berdi: {e}\n\nRaqamni to'g'ri kiritganingizga ishonch hosil qiling va /start bosing (Mobodo kod orasini ochishni unutgan bo'lsangiz, qaytadan login qiling).")
             
     elif state == "wait_code":
         code = text.replace(" ", "")
