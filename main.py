@@ -22,7 +22,8 @@ active_tags = {}
 
 async def start_user_client(user_id):
     """Foydalanuvchi akkauntini fonda ishga tushirish va buyruqlarni biriktirish"""
-    session_name = f"session_{user_id}"
+    os.makedirs("data", exist_ok=True)
+    session_name = os.path.join("data", f"session_{user_id}")
     if os.path.exists(f"{session_name}.session"):
         client = Client(session_name, api_id=API_ID, api_hash=API_HASH)
         
@@ -125,33 +126,124 @@ async def start_cmd(client, message):
         user_states.pop(user_id, None)
         await message.reply_text("✅ Siz allaqachon tizimga kirgansiz!\n\nIstalgan guruhga kirib `.atag matn` yoki to'xtatish uchun `.stop` buyruqlarini ishlatavering.")
     else:
-        user_states[user_id] = "wait_phone"
-        await message.reply_text("👋 Assalomu alaykum! Maxfiy U-Tag botiga xush kelibsiz.\n\n📱 Iltimos, Telegram raqamingizni xalqaro formatda yuboring (masalan: +998901234567):")
+        user_states[user_id] = "wait_terms_agree"
+        terms_text = (
+            "📜 **Foydalanish shartlari va Maxfiylik Siyosati (Privacy Policy)**\n\n"
+            "U-Tag Bot xizmatlaridan foydalanish orqali siz quyidagilarga rozi bo'lasiz:\n"
+            "1️⃣ Bot orqali jo'natilgan xabarlar, spam yoki boshqa harakatlar uchun foydalanuvchining shaxsan o'zi javobgar.\n"
+            "2️⃣ Bot faqatgina vositachi hisoblanadi. Telegram tomonidan profilingizga tushadigan har qanday cheklov (ban/spam) uchun ma'muriyat javobgar emas.\n"
+            "3️⃣ Xavfsizligingizni ta'minlash maqsadida bot orqali kirgan akkauntingiz barcha ma'lumotlari shifrlangan tarzda faqat ushbu serverda saqlanadi.\n\n"
+            "Iltimos, botdan foydalanishni davom ettirish uchun shartlarga rozi ekanligingizni tasdiqlang."
+        )
+        from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton
+        markup = ReplyKeyboardMarkup([
+            [KeyboardButton("✅ Shartlarni qabul qilaman")]
+        ], resize_keyboard=True)
+        await message.reply_text(terms_text, reply_markup=markup)
 
-@bot_app.on_message(filters.text & filters.private)
+@bot_app.on_message((filters.text | filters.contact) & filters.private)
 async def handle_text(client, message):
     user_id = message.from_user.id
     state = user_states.get(user_id)
     text = message.text
-    
+    if message.contact:
+        text = message.contact.phone_number
+
+    if not text:
+        return
+        
+    if text in ["❌ Bekor qilish", "/cancel"]:
+        user_states.pop(user_id, None)
+        from pyrogram.types import ReplyKeyboardRemove
+        await message.reply_text("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if state == "wait_terms_agree":
+        if text == "✅ Shartlarni qabul qilaman":
+            user_states[user_id] = "wait_phone"
+            from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton
+            markup = ReplyKeyboardMarkup([
+                [KeyboardButton("📞 Telefon raqamini yuborish", request_contact=True)],
+                [KeyboardButton("❌ Bekor qilish")]
+            ], resize_keyboard=True)
+            
+            await message.reply_text(
+                "🔌 **Sessiya ulash jarayoni boshlandi.**\n\n"
+                "Iltimos, Telegram akkauntingiz telefon raqamini kiriting (masalan: `+998901234567` formatida) "
+                "yoki pastdagi tugma orqali yuboring:",
+                reply_markup=markup
+            )
+        else:
+            await message.reply_text("Iltimos, pastdagi tugma orqali shartlarga rozi bo'ling.")
+        return
+        
     if state == "wait_phone":
         phone = text.strip()
         # Nomerda + bo'lmasa, uni qo'shib qo'yamiz (Qirg'iziston va boshqalar uchun Telegram talabi)
         phone_cleaned = "".join(c for c in phone if c.isdigit())
+        if not phone_cleaned or len(phone_cleaned) < 7:
+            await message.reply_text(
+                "❌ **Noto'g'ri telefon raqam!**\n\n"
+                "Iltimos, to'g'ri formatda kiriting:\n"
+                "Masalan: `+998901234567` yoki `+996227016262`"
+            )
+            return
         phone = "+" + phone_cleaned
         
+        # Oldingi chala sessiyani tozalash
+        session_path = os.path.join("data", f"session_{user_id}.session")
+        if user_id in login_data and "client" in login_data[user_id]:
+            try:
+                await login_data[user_id]["client"].disconnect()
+            except:
+                pass
+        login_data.pop(user_id, None)
+        # Chala sessiya faylini o'chirish
+        if os.path.exists(session_path):
+            os.remove(session_path)
+        
         login_data[user_id] = {"phone": phone}
-        temp_client = Client(f"session_{user_id}", api_id=API_ID, api_hash=API_HASH)
-        await temp_client.connect()
-        login_data[user_id]["client"] = temp_client
+        os.makedirs("data", exist_ok=True)
         
         try:
+            temp_client = Client(os.path.join("data", f"session_{user_id}"), api_id=API_ID, api_hash=API_HASH)
+            await temp_client.connect()
+            login_data[user_id]["client"] = temp_client
+            
             sent_code = await temp_client.send_code(phone)
             login_data[user_id]["phone_code_hash"] = sent_code.phone_code_hash
             user_states[user_id] = "wait_code"
-            await message.reply_text("📩 Telegramingizga kod yuborildi!\n\nIltimos kodni yozing (masalan: `12345` bo'lsa `1 2 3 4 5` shaklida bo'sh joy tashlab yozing):")
+            from pyrogram.types import ReplyKeyboardRemove
+            await message.reply_text(
+                f"📩 **Kod yuborildi!**\n\n"
+                f"📱 Raqam: `{phone}`\n\n"
+                f"Telegramingizga kelgan kodni yozing\n"
+                f"(masalan: `12345` bo'lsa `1 2 3 4 5` shaklida bo'sh joy tashlab yozing):",
+                reply_markup=ReplyKeyboardRemove()
+            )
         except Exception as e:
-            await message.reply_text(f"❌ Xatolik yuz berdi: {e}\n\nRaqamni to'g'ri kiritganingizga ishonch hosil qiling va /start bosing (Mobodo kod orasini ochishni unutgan bo'lsangiz, qaytadan login qiling).")
+            # Xatolikda tozalash
+            if user_id in login_data and "client" in login_data[user_id]:
+                try:
+                    await login_data[user_id]["client"].disconnect()
+                except:
+                    pass
+            login_data.pop(user_id, None)
+            if os.path.exists(session_path):
+                os.remove(session_path)
+            
+            err_text = str(e)
+            if "phone number invalid" in err_text.lower():
+                await message.reply_text(
+                    f"❌ **Telegram bu raqamni qabul qilmadi:** `{phone}`\n\n"
+                    "Iltimos, raqamni xalqaro formatda tekshirib qaytadan yozing.\n"
+                    "Masalan: `+996227016262` yoki `+998901234567`"
+                )
+            else:
+                await message.reply_text(
+                    f"❌ **Xatolik yuz berdi:** {e}\n\n"
+                    "Qaytadan urinish uchun /start bosing."
+                )
             
     elif state == "wait_code":
         code = text.replace(" ", "")
@@ -189,7 +281,8 @@ if __name__ == "__main__":
     print("=========================================")
     
     # Avvaldan mavjud sessiyalarni avtomatik fonda ishga tushirish
-    for file in os.listdir():
+    os.makedirs("data", exist_ok=True)
+    for file in os.listdir("data"):
         if file.startswith("session_") and file.endswith(".session"):
             uid = file.split("_")[1].split(".")[0]
             try:
