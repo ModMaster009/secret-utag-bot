@@ -40,7 +40,7 @@ async def start_user_client(user_id):
             return False
         
         # .atag buyrug'ini foydalanuvchi akkauntiga ulash
-        @client.on_message(filters.command("atag", prefixes=".") & filters.me)
+        @client.on_message(filters.regex(r"^\.atag(?:\s+|$)") & filters.me)
         async def start_atag(cli, message):
             chat_id = message.chat.id
             if len(message.text.split()) > 1:
@@ -92,7 +92,7 @@ async def start_user_client(user_id):
                 await message.edit_text(f"❌ Xatolik yuz berdi: {e}")
 
         # .stop buyrug'ini biriktirish
-        @client.on_message(filters.command("stop", prefixes=".") & filters.me)
+        @client.on_message(filters.regex(r"^\.stop(?:\s+|$)") & filters.me)
         async def stop_atag(cli, message):
             chat_id = message.chat.id
             if active_tags.get(f"{user_id}_{chat_id}"):
@@ -109,7 +109,7 @@ async def start_user_client(user_id):
 
 # ================= BOT INTERFEYSI =================
 
-@bot_app.on_message(filters.command("start") & filters.private)
+@bot_app.on_message(filters.regex(r"^/start") & filters.private)
 async def start_cmd(client, message):
     user_id = message.from_user.id
     
