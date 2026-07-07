@@ -136,6 +136,10 @@ async def handle_text(client, message):
     
     if state == "wait_phone":
         phone = text.strip()
+        # Nomerda + bo'lmasa, uni qo'shib qo'yamiz (Qirg'iziston va boshqalar uchun Telegram talabi)
+        phone_cleaned = "".join(c for c in phone if c.isdigit())
+        phone = "+" + phone_cleaned
+        
         login_data[user_id] = {"phone": phone}
         temp_client = Client(f"session_{user_id}", api_id=API_ID, api_hash=API_HASH)
         await temp_client.connect()
